@@ -4,5 +4,8 @@ RUNNER=jlink
 flash: build
 	west flash -r $(RUNNER) --reset
 
-build:
+build: clean
 	west build -b $(BOARD) --pristine
+
+clean :
+	rm -rf build
