@@ -2,22 +2,25 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 
-// Define `GPIOA_NODE` as the node whose label is `gpioa` in the device tree
-#define GPIOA_NODE DT_NODELABEL(gpioa)
+// Designate the `led0` alias from the device tree
+#define LED_NODE DT_ALIAS(led0)
 
-// Get the struct device pointer to `gpioa` at compile time
-static const struct device * const gpioa_dev = DEVICE_DT_GET(GPIOA_NODE);
+// Get the GPIO (port, pin and flags) corresponding to the
+// `led0` node alias at compile time.
+static const struct gpio_dt_spec led_gpio = GPIO_DT_SPEC_GET(LED_NODE, gpios);
 
 int main() {
-  if (!device_is_ready(gpioa_dev)) {
-    return -ENODEV;  // Device is not ready
+  if (!device_is_ready(led_gpio.port)) {
+    return -ENODEV;
   }
-  // Configure the led as an output, initially inactive
-  gpio_pin_configure(gpioa_dev, 5, GPIO_OUTPUT_INACTIVE);
-  // Toggle the led every second
+  // Note that we use `INACTIVE`, not `LOW`. On some boards,
+  // the behaviour of the output may be reversed, but this
+  // is not our concern. This info belongs to the device tree.
+  gpio_pin_configure_dt(&led_gpio, GPIO_OUTPUT_INACTIVE);
   for (;;) {
-    gpio_pin_toggle(gpioa_dev, 5);
+    gpio_pin_toggle_dt(&led_gpio);
     k_sleep(K_SECONDS(1));
   }
   return 0;
 }
+
