@@ -14,14 +14,16 @@ int main() {
     return -ENODEV;
   }
   for (;;) {
-    // switch on LD1, switch off LD2
-    led_on(led_device, 0);
+    // turn off all leds
+    led_off(led_device, 0);
     led_off(led_device, 1);
+    led_off(led_device, 2);
     k_sleep(K_SECONDS(1)); 
 
-    // switch off LD1, switch on LD2
-    led_off(led_device, 0);
+    // turn on all leds
+    led_on(led_device, 0);
     led_on(led_device, 1);
+    led_on(led_device, 2);
     k_sleep(K_SECONDS(1));
   }
   return 0;

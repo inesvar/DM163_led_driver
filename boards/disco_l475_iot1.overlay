@@ -1,0 +1,9 @@
+/ {
+  leds {
+    blue_led: led_3 {
+      gpios = < &gpioc 0x9 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+      label = "User LD3";
+    };
+  };
+};
+
