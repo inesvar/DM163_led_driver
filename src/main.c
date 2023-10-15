@@ -32,8 +32,8 @@ static struct gpio_callback button_cb_data;
 static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
                                                      {0});
 
-void button_pressed(const struct device *dev, struct gpio_callback *cb,
-                    uint32_t pins)
+void button_pressed_or_released(const struct device *dev, struct gpio_callback *cb,
+                                uint32_t pins)
 {
   int val = gpio_pin_get_dt(&button);
   gpio_pin_set_dt(&led, val);
@@ -68,7 +68,7 @@ int main(void)
     return 0;
   }
 
-  gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
+  gpio_init_callback(&button_cb_data, button_pressed_or_released, BIT(button.pin));
   gpio_add_callback(button.port, &button_cb_data);
   printk("Set up button at %s pin %d\n", button.port->name, button.pin);
 
