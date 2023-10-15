@@ -8,11 +8,13 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys_clock.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/printk.h>
 #include <inttypes.h>
 
 #define SLEEP_TIME_MS 1
+#define TURN_OFF_LED_TASK_DELAY_MS K_MSEC(1000)
 
 /*
  * Get button configuration from the devicetree sw0 alias. This is mandatory.
@@ -32,12 +34,23 @@ static struct gpio_callback button_cb_data;
 static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
                                                      {0});
 
-void button_pressed_or_released(const struct device *dev, struct gpio_callback *cb,
-                                uint32_t pins)
+/*
+ * This task turns off the led one second after the button press.
+ */
+static struct k_work_delayable turn_off_led_task;
+
+void turn_off_led(struct k_work *task)
 {
-  int val = gpio_pin_get_dt(&button);
-  gpio_pin_set_dt(&led, val);
-  printk("Button interrupt at %" PRIu32 "\nLogical button value is %d\n", k_cycle_get_32(), val);
+  gpio_pin_set_dt(&led, 0);
+  printk("Led turned off at %" PRIu32 "\n", k_cycle_get_32());
+}
+
+void button_pressed(const struct device *dev, struct gpio_callback *cb,
+                    uint32_t pins)
+{
+  gpio_pin_set_dt(&led, 1);
+  k_work_reschedule(&turn_off_led_task, TURN_OFF_LED_TASK_DELAY_MS);
+  printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
 }
 
 int main(void)
@@ -60,7 +73,7 @@ int main(void)
   }
 
   ret = gpio_pin_interrupt_configure_dt(&button,
-                                        GPIO_INT_EDGE_BOTH);
+                                        GPIO_INT_EDGE_TO_ACTIVE);
   if (ret != 0)
   {
     printk("Error %d: failed to configure interrupt on %s pin %d\n",
@@ -68,7 +81,7 @@ int main(void)
     return 0;
   }
 
-  gpio_init_callback(&button_cb_data, button_pressed_or_released, BIT(button.pin));
+  gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
   gpio_add_callback(button.port, &button_cb_data);
   printk("Set up button at %s pin %d\n", button.port->name, button.pin);
 
@@ -92,6 +105,9 @@ int main(void)
       printk("Set up LED at %s pin %d\n", led.port->name, led.pin);
     }
   }
+
+  k_work_init_delayable(&turn_off_led_task, turn_off_led);
+  printk("Initialized the delayable work item \"turn_off_led_task\"\n");
 
   printk("Press the button\n");
   return 0;
