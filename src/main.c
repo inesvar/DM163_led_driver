@@ -106,6 +106,11 @@ int main(void)
     }
   }
 
+  if (!led.port)
+  {
+    return 0;
+  }
+
   k_work_init_delayable(&turn_off_led_task, turn_off_led);
   printk("Initialized the delayable work item \"turn_off_led_task\"\n");
 
