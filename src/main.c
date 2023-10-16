@@ -39,18 +39,57 @@ static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
  */
 static struct k_work_delayable turn_off_led_task;
 
-void turn_off_led(struct k_work *task)
+struct work_context
 {
-  gpio_pin_set_dt(&led, 0);
-  printk("Led turned off at %" PRIu32 "\n", k_cycle_get_32());
+  struct k_work_delayable task;
+  int ignore_next_task;
+};
+
+static struct work_context led_task_ctx;
+
+void turn_off_led(struct k_work *work)
+{
+  printk("Starting task...\n");
+  k_sleep(K_MSEC(1000));
+  struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+  struct work_context *ctx = CONTAINER_OF(dwork, struct work_context,
+                                          task);
+  // disabling the button interrupt
+  // interrupt 40 : EXTI lines 10 to 15
+  irq_disable(40);
+  printk("Entering critical section\n");
+  k_sleep(K_MSEC(1000));
+  if (ctx->ignore_next_task == 0)
+  {
+    gpio_pin_set_dt(&led, 0);
+    printk("Led turned off at %" PRIu32 "\n", k_cycle_get_32());
+  }
+  else
+  {
+    ctx->ignore_next_task = 0;
+  }
+  printk("Exiting critical section\n");
+  irq_enable(40);
+  k_sleep(K_MSEC(1000));
+  printk("Exiting task...\n");
 }
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins)
 {
-  gpio_pin_set_dt(&led, 1);
-  k_work_reschedule(&turn_off_led_task, TURN_OFF_LED_TASK_DELAY_MS);
   printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
+  // Ensuring the task will not switch off the led right after this interrupt
+  // in other words : if the task is running and the led is on,
+  // set a flag preventing normal execution
+  int result = k_work_delayable_busy_get(&led_task_ctx.task);
+  if ((result & K_WORK_RUNNING) && gpio_pin_get_dt(&led))
+  {
+    printk("turn_off_led_task is running and would have turned off the led prematurely.\n");
+    led_task_ctx.ignore_next_task = 1;
+  }
+  // Turn on the light and reschedule the turn off led task
+  gpio_pin_set_dt(&led, 1);
+  k_work_reschedule(&led_task_ctx.task, TURN_OFF_LED_TASK_DELAY_MS);
 }
 
 int main(void)
@@ -113,6 +152,9 @@ int main(void)
 
   k_work_init_delayable(&turn_off_led_task, turn_off_led);
   printk("Initialized the delayable work item \"turn_off_led_task\"\n");
+  led_task_ctx.task = turn_off_led_task;
+  led_task_ctx.ignore_next_task = 0;
+  printk("Initialized the work context \"led_task_ctx\"\n");
 
   printk("Press the button\n");
   return 0;
