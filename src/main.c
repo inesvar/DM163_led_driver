@@ -49,16 +49,12 @@ static struct work_context led_task_ctx;
 
 void turn_off_led(struct k_work *work)
 {
-  printk("Starting task...\n");
-  k_sleep(K_MSEC(1000));
   struct k_work_delayable *dwork = k_work_delayable_from_work(work);
   struct work_context *ctx = CONTAINER_OF(dwork, struct work_context,
                                           task);
   // disabling the button interrupt
   // interrupt 40 : EXTI lines 10 to 15
   irq_disable(40);
-  printk("Entering critical section\n");
-  k_sleep(K_MSEC(1000));
   if (ctx->ignore_next_task == 0)
   {
     gpio_pin_set_dt(&led, 0);
@@ -68,10 +64,7 @@ void turn_off_led(struct k_work *work)
   {
     ctx->ignore_next_task = 0;
   }
-  printk("Exiting critical section\n");
   irq_enable(40);
-  k_sleep(K_MSEC(1000));
-  printk("Exiting task...\n");
 }
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb,
