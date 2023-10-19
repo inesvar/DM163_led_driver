@@ -66,11 +66,11 @@ int main(void)
 }
 
 static blink_half_period_ms_t get_blink_period_from_measure() {
-    struct sensor_value distance;
+    struct sensor_value proximity;
     sensor_sample_fetch(tof_sensor);
-    sensor_channel_get(tof_sensor, SENSOR_CHAN_DISTANCE, &distance);
+    sensor_channel_get(tof_sensor, SENSOR_CHAN_PROX, &proximity);
 
-    if (!distance.val1 && distance.val2 < 200000)
+    if (proximity.val1)
     {
       return FAST_BLINK;
     }
