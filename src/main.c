@@ -1,27 +1,129 @@
+/*
+ * Copyright (c) 2016 Open-RnD Sp. z o.o.
+ * Copyright (c) 2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/sys_clock.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/printk.h>
 #include <inttypes.h>
 
-#define ACCELEROMETER_NODE DT_ALIAS(accel0)
-static struct i2c_dt_spec accelerometer_i2c = I2C_DT_SPEC_GET(ACCELEROMETER_NODE);
+#define SLEEP_TIME_MS 1
+#define TURN_OFF_LED_TASK_DELAY_MS K_MSEC(1000)
+
+/*
+ * Get button configuration from the devicetree sw0 alias. This is mandatory.
+ */
+#define SW0_NODE DT_ALIAS(sw0)
+#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
+#error "Unsupported board: sw0 devicetree alias is not defined"
+#endif
+static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
+                                                              {0});
+static struct gpio_callback button_cb_data;
+
+/*
+ * The led0 devicetree alias is optional. If present, we'll use it
+ * to turn on the LED whenever the button is pressed.
+ */
+static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
+                                                     {0});
+
+/*
+ * Led tasks.
+ */
+static struct k_work_delayable turn_off_led_task;
+static struct k_work_delayable turn_on_led_task;
+
+void turn_off_led(struct k_work *work)
+{
+  gpio_pin_set_dt(&led, 0);
+  printk("Led turned off at %" PRIu32 "\n", k_cycle_get_32());
+}
+
+void turn_on_led(struct k_work *work)
+{
+  gpio_pin_set_dt(&led, 1);
+  printk("Led turned on at %" PRIu32 "\n", k_cycle_get_32());
+}
+
+void button_pressed(const struct device *dev, struct gpio_callback *cb,
+                    uint32_t pins)
+{
+  printk("\nButton pressed at %" PRIu32 "\n", k_cycle_get_32());
+  // Schedule a turn on the light task and reschedule the turn off led task.
+  // If a turn off led task is running, turn on led will be called after it's done.
+  k_work_schedule(&turn_on_led_task, K_NO_WAIT);
+  k_work_reschedule(&turn_off_led_task, TURN_OFF_LED_TASK_DELAY_MS);
+}
 
 int main(void)
 {
-  if (!i2c_is_ready_dt(&accelerometer_i2c))
+  int ret;
+
+  if (!gpio_is_ready_dt(&button))
   {
-    printk("Accelerometer isn't ready\n");
-    return 1;
+    printk("Error: button device %s is not ready\n",
+           button.port->name);
+    return 0;
   }
 
-  uint8_t accelerometer_read_address = (accelerometer_i2c.addr << 1) | 1;
-  printk("Accelerometer is ready, read address on I2C bus is 0x%x\n", accelerometer_read_address);
-  uint8_t who_am_I = 0;
-  i2c_reg_read_byte_dt(&accelerometer_i2c, 0x0F, &who_am_I);
+  ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
+  if (ret != 0)
+  {
+    printk("Error %d: failed to configure %s pin %d\n",
+           ret, button.port->name, button.pin);
+    return 0;
+  }
 
-  printk("Content of who_am_I register : 0x%x\n", who_am_I);
+  ret = gpio_pin_interrupt_configure_dt(&button,
+                                        GPIO_INT_EDGE_TO_ACTIVE);
+  if (ret != 0)
+  {
+    printk("Error %d: failed to configure interrupt on %s pin %d\n",
+           ret, button.port->name, button.pin);
+    return 0;
+  }
+
+  gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
+  gpio_add_callback(button.port, &button_cb_data);
+  printk("Set up button at %s pin %d\n", button.port->name, button.pin);
+
+  if (led.port && !gpio_is_ready_dt(&led))
+  {
+    printk("Error %d: LED device %s is not ready; ignoring it\n",
+           ret, led.port->name);
+    led.port = NULL;
+  }
+  if (led.port)
+  {
+    ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT);
+    if (ret != 0)
+    {
+      printk("Error %d: failed to configure LED device %s pin %d\n",
+             ret, led.port->name, led.pin);
+      led.port = NULL;
+    }
+    else
+    {
+      printk("Set up LED at %s pin %d\n", led.port->name, led.pin);
+    }
+  }
+
+  if (!led.port)
+  {
+    return 0;
+  }
+
+  k_work_init_delayable(&turn_off_led_task, turn_off_led);
+  k_work_init_delayable(&turn_on_led_task, turn_on_led);  
+  printk("Initialized the led tasks\n");
+
+  printk("Press the button\n");
   return 0;
 }
