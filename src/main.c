@@ -1,129 +1,156 @@
-/*
- * Copyright (c) 2016 Open-RnD Sp. z o.o.
- * Copyright (c) 2020 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-#include <zephyr/kernel.h>
+#include <inttypes.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/sys_clock.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/sys/printk.h>
-#include <inttypes.h>
-
-#define SLEEP_TIME_MS 1
-#define TURN_OFF_LED_TASK_DELAY_MS K_MSEC(1000)
+#include <zephyr/sys_clock.h>
 
 /*
- * Get button configuration from the devicetree sw0 alias. This is mandatory.
+ * Getting the accelerometer from the device tree
  */
-#define SW0_NODE DT_ALIAS(sw0)
-#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
-#error "Unsupported board: sw0 devicetree alias is not defined"
-#endif
-static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
-                                                              {0});
-static struct gpio_callback button_cb_data;
+#define ACCELEROMETER_NODE DT_ALIAS(accel0)
+
+static struct i2c_dt_spec accelerometer_i2c =
+    I2C_DT_SPEC_GET(ACCELEROMETER_NODE);
+
+static const struct gpio_dt_spec accelerometer_irq_gpio =
+    GPIO_DT_SPEC_GET(ACCELEROMETER_NODE, irq_gpios);
 
 /*
- * The led0 devicetree alias is optional. If present, we'll use it
- * to turn on the LED whenever the button is pressed.
+ * Accelerometer interrupt callback data
  */
-static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
-                                                     {0});
+static struct gpio_callback acceleration_isr_data;
 
 /*
- * Led tasks.
+ * Workqueue job to print the acceleration, submitted from interrupt
  */
-static struct k_work_delayable turn_off_led_task;
-static struct k_work_delayable turn_on_led_task;
+static struct k_work print_acceleration_job;
 
-void turn_off_led(struct k_work *work)
-{
-  gpio_pin_set_dt(&led, 0);
-  printk("Led turned off at %" PRIu32 "\n", k_cycle_get_32());
-}
+/*
+ * Linear acceleration register address, values and axis labels
+ */
+static uint8_t acceleration_register_address = 0x28;
+static uint8_t acceleration_register[6];
+static char acceleration_axis_label[3] = {'X', 'Y', 'Z'};
 
-void turn_on_led(struct k_work *work)
-{
-  gpio_pin_set_dt(&led, 1);
-  printk("Led turned on at %" PRIu32 "\n", k_cycle_get_32());
-}
+static void acceleration_isr(const struct device *dev, struct gpio_callback *cb,
+                             uint32_t pins);
+static void configure_accelerometer();
+static int setup_gpio_irq_and_workqueue();
+static void print_acceleration();
 
-void button_pressed(const struct device *dev, struct gpio_callback *cb,
-                    uint32_t pins)
-{
-  printk("\nButton pressed at %" PRIu32 "\n", k_cycle_get_32());
-  // Schedule a turn on the light task and reschedule the turn off led task.
-  // If a turn off led task is running, turn on led will be called after it's done.
-  k_work_schedule(&turn_on_led_task, K_NO_WAIT);
-  k_work_reschedule(&turn_off_led_task, TURN_OFF_LED_TASK_DELAY_MS);
-}
+LOG_MODULE_REGISTER(accelerometer, LOG_LEVEL_INF);
 
-int main(void)
-{
-  int ret;
-
-  if (!gpio_is_ready_dt(&button))
-  {
-    printk("Error: button device %s is not ready\n",
-           button.port->name);
-    return 0;
+int main(void) {
+  if (!i2c_is_ready_dt(&accelerometer_i2c)) {
+    LOG_ERR("Accelerometer isn't ready\n");
+    return 1;
   }
 
-  ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
-  if (ret != 0)
-  {
-    printk("Error %d: failed to configure %s pin %d\n",
-           ret, button.port->name, button.pin);
-    return 0;
+  if (!setup_gpio_irq_and_workqueue()) {
+    return 1;
   }
 
-  ret = gpio_pin_interrupt_configure_dt(&button,
-                                        GPIO_INT_EDGE_TO_ACTIVE);
-  if (ret != 0)
-  {
-    printk("Error %d: failed to configure interrupt on %s pin %d\n",
-           ret, button.port->name, button.pin);
-    return 0;
-  }
+  configure_accelerometer();
 
-  gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
-  gpio_add_callback(button.port, &button_cb_data);
-  printk("Set up button at %s pin %d\n", button.port->name, button.pin);
-
-  if (led.port && !gpio_is_ready_dt(&led))
-  {
-    printk("Error %d: LED device %s is not ready; ignoring it\n",
-           ret, led.port->name);
-    led.port = NULL;
-  }
-  if (led.port)
-  {
-    ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT);
-    if (ret != 0)
-    {
-      printk("Error %d: failed to configure LED device %s pin %d\n",
-             ret, led.port->name, led.pin);
-      led.port = NULL;
-    }
-    else
-    {
-      printk("Set up LED at %s pin %d\n", led.port->name, led.pin);
-    }
-  }
-
-  if (!led.port)
-  {
-    return 0;
-  }
-
-  k_work_init_delayable(&turn_off_led_task, turn_off_led);
-  k_work_init_delayable(&turn_on_led_task, turn_on_led);  
-  printk("Initialized the led tasks\n");
-
-  printk("Press the button\n");
   return 0;
+}
+
+/*
+ * Accelerometer Interrupt Handler
+ * Submit a print acceleration job to the workqueue
+ */
+static void acceleration_isr(const struct device *dev, struct gpio_callback *cb,
+                             uint32_t pins) {
+  k_work_submit(&print_acceleration_job);
+}
+
+static void configure_accelerometer() {
+  // reset the accelerometer device
+  // set bit 0 of register 12 (CTRL3_C) to 1
+  uint8_t bit_mask = 1;
+  uint8_t value = 1;
+  i2c_reg_update_byte_dt(&accelerometer_i2c, 0x12, bit_mask, value);
+
+  // disable high performance mode for the accelerometer
+  // set bit 4 of register 15 (CTRL6_C) to 1
+  bit_mask = 1 << 4;
+  value = 1 << 4;
+  i2c_reg_update_byte_dt(&accelerometer_i2c, 0x15, bit_mask, value);
+
+  // set output data rate of accelerometer at 1.6Hz
+  // set bits [7:4] of register 10 (CTRL1_XL) to 1011
+  bit_mask = 0xF << 4;
+  value = 0xB << 4;
+  i2c_reg_update_byte_dt(&accelerometer_i2c, 0x10, bit_mask, value);
+
+  // allowing the interruption Accelerometer Data Ready on INT1
+  // set bit 0 of register 0D (INT1_CTRL) to 1
+  bit_mask = 1;
+  value = 1;
+  i2c_reg_update_byte_dt(&accelerometer_i2c, 0x0D, bit_mask, value);
+}
+
+static int setup_gpio_irq_and_workqueue() {
+  /*
+   * Checking that the GPIO is ready
+   * configuring it as an input with an interrupt.
+   */
+  if (!device_is_ready(accelerometer_irq_gpio.port)) {
+    LOG_ERR("GPIO is not ready\n");
+    return 0;
+  }
+
+  if (gpio_pin_configure_dt(&accelerometer_irq_gpio, GPIO_INPUT)) {
+    LOG_ERR("GPIO configured as input\n");
+    return 0;
+  }
+
+  if (gpio_pin_interrupt_configure_dt(&accelerometer_irq_gpio,
+                                      GPIO_INT_EDGE_RISING)) {
+    LOG_ERR("GPIO interruption configured\n");
+    return 0;
+  }
+
+  // Adding a callback to select the interrupt handler.
+  gpio_init_callback(&acceleration_isr_data, acceleration_isr,
+                     BIT(accelerometer_irq_gpio.pin));
+
+  if (gpio_add_callback(accelerometer_irq_gpio.port, &acceleration_isr_data)) {
+    LOG_ERR("Callback couldn't be added\n");
+    return 0;
+  }
+
+  /*
+   * Initializing a workqueue job to execute the blocking I2C
+   * operation to read the acceleration.
+   */
+  k_work_init(&print_acceleration_job, print_acceleration);
+
+  LOG_INF("Irq setup was successful\n");
+  return 1;
+}
+
+static void print_acceleration() {
+  static int measure_count = 0;
+
+  while (gpio_pin_get_dt(&accelerometer_irq_gpio)) {
+    LOG_DBG("measure number %d\n", measure_count);
+    // read the contents of all 6 acceleration registers
+    // put their contents in a buffer
+    i2c_write_read_dt(&accelerometer_i2c, &acceleration_register_address, 1,
+                      acceleration_register, 6);
+
+    for (int i = 0; i < 3; i++) {
+      uint16_t acceleration = acceleration_register[i * 2] |
+                              (acceleration_register[2 * i + 1] << 8);
+      int16_t signed_acceleration = (int16_t)acceleration;
+      LOG_PRINTK("%c axis acceleration %hd (1g = 16384)\n",
+                 acceleration_axis_label[i], signed_acceleration);
+    }
+    LOG_PRINTK("\n");
+    measure_count++;
+  }
 }
