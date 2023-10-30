@@ -6,6 +6,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
+#include <math.h>
 
 /*
  * Getting the accelerometer from the device tree
@@ -24,22 +25,22 @@ static const struct gpio_dt_spec accelerometer_irq_gpio =
 static struct gpio_callback acceleration_isr_data;
 
 /*
- * Workqueue job to print the acceleration, submitted from interrupt
+ * Workqueue job that computes the board tilt angle
  */
-static struct k_work print_acceleration_job;
+static struct k_work compute_board_tilt_job;
 
 /*
- * Linear acceleration register address, values and axis labels
+ * Linear acceleration register address and values
  */
 static uint8_t acceleration_register_address = 0x28;
+static int16_t acceleration_measure[3];
 static uint8_t acceleration_register[6];
-static char acceleration_axis_label[3] = {'X', 'Y', 'Z'};
 
 static void acceleration_isr(const struct device *dev, struct gpio_callback *cb,
                              uint32_t pins);
 static void configure_accelerometer();
 static int setup_gpio_irq_and_workqueue();
-static void print_acceleration();
+static void compute_board_tilt();
 
 LOG_MODULE_REGISTER(accelerometer, LOG_LEVEL_INF);
 
@@ -60,11 +61,12 @@ int main(void) {
 
 /*
  * Accelerometer Interrupt Handler
- * Submit a print acceleration job to the workqueue
+ * Submit a compute board tilt job to the workqueue
  */
 static void acceleration_isr(const struct device *dev, struct gpio_callback *cb,
-                             uint32_t pins) {
-  k_work_submit(&print_acceleration_job);
+                             uint32_t pins)
+{
+  k_work_submit(&compute_board_tilt_job);
 }
 
 static void configure_accelerometer() {
@@ -80,10 +82,10 @@ static void configure_accelerometer() {
   value = 1 << 4;
   i2c_reg_update_byte_dt(&accelerometer_i2c, 0x15, bit_mask, value);
 
-  // set output data rate of accelerometer at 1.6Hz
-  // set bits [7:4] of register 10 (CTRL1_XL) to 1011
+  // set output data rate of accelerometer at 52Hz
+  // set bits [7:4] of register 10 (CTRL1_XL) to 0011
   bit_mask = 0xF << 4;
-  value = 0xB << 4;
+  value = 0x3 << 4;
   i2c_reg_update_byte_dt(&accelerometer_i2c, 0x10, bit_mask, value);
 
   // allowing the interruption Accelerometer Data Ready on INT1
@@ -125,32 +127,36 @@ static int setup_gpio_irq_and_workqueue() {
 
   /*
    * Initializing a workqueue job to execute the blocking I2C
-   * operation to read the acceleration.
+   * operation to read the acceleration and compute the tilt angle
    */
-  k_work_init(&print_acceleration_job, print_acceleration);
+  k_work_init(&compute_board_tilt_job, compute_board_tilt);
 
   LOG_INF("Irq setup was successful\n");
   return 1;
 }
 
-static void print_acceleration() {
-  static int measure_count = 0;
-
-  while (gpio_pin_get_dt(&accelerometer_irq_gpio)) {
-    LOG_DBG("measure number %d\n", measure_count);
+static void compute_board_tilt()
+{
+  while (gpio_pin_get_dt(&accelerometer_irq_gpio))
+  {
     // read the contents of all 6 acceleration registers
     // put their contents in a buffer
     i2c_write_read_dt(&accelerometer_i2c, &acceleration_register_address, 1,
                       acceleration_register, 6);
 
-    for (int i = 0; i < 3; i++) {
-      uint16_t acceleration = acceleration_register[i * 2] |
-                              (acceleration_register[2 * i + 1] << 8);
-      int16_t signed_acceleration = (int16_t)acceleration;
-      LOG_PRINTK("%c axis acceleration %hd (1g = 16384)\n",
-                 acceleration_axis_label[i], signed_acceleration);
+    // get the acceleration measures from register contents
+    // compute the norm of the acceleration
+    int32_t squared_norm = 0;
+    for (int i = 0; i < 3; i++)
+    {
+      uint16_t acceleration = acceleration_register[i * 2] | (acceleration_register[i * 2 + 1] << 8);
+      acceleration_measure[i] = (int16_t)acceleration;
+      squared_norm += acceleration_measure[i] * acceleration_measure[i];
     }
-    LOG_PRINTK("\n");
-    measure_count++;
+    double norm = sqrt(squared_norm);
+
+    // compute the tilt angle
+    double tilt_angle = acos(acceleration_measure[2] / norm) * 180 / 3.1415926535;
+    LOG_PRINTK("tilt angle : %g°\n\n", tilt_angle);
   }
 }
