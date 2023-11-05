@@ -19,6 +19,9 @@ static struct i2c_dt_spec accelerometer_i2c =
 static const struct gpio_dt_spec accelerometer_irq_gpio =
     GPIO_DT_SPEC_GET(ACCELEROMETER_NODE, irq_gpios);
 
+#define ACCELEROMETER_ODR 52
+#define GYROSCOPE_ODR 52
+
 /*
  * Sensor interrupt callback data
  */
@@ -49,16 +52,16 @@ static uint8_t acceleration_register[6];
 /*
  * Angular rate register address and values
  */
-static char axis_label[3] = {'X', 'Y', 'Z'};
+static char axis_label[2] = {'X', 'Y'};
 static uint8_t angular_rate_register_address = 0x22;
-static uint8_t angular_rate_register[6];
-static int16_t angular_rate_measure[3];
+static uint8_t angular_rate_register[4];
+static int16_t angular_rate_measure[2];
 
 static void sensor_isr(const struct device *dev, struct gpio_callback *cb,
                        uint32_t pins);
 static void handle_new_data();
 static void compute_board_tilt_from_acceleration();
-static void print_angular_rate();
+static void compute_board_tilt_from_angular_rate();
 static void configure_accelerometer();
 static int setup_gpio_irq_and_workqueue();
 
@@ -101,9 +104,8 @@ static void handle_new_data() {
     }
 
     if (status_reg & 0x2) {
-      print_angular_rate();
+      compute_board_tilt_from_angular_rate();
     }
-    LOG_PRINTK("\n");
   }
 }
 
@@ -125,26 +127,38 @@ static void compute_board_tilt_from_acceleration() {
   double norm = sqrt(squared_norm);
   // compute the tilt angle
   double tilt_angle = acos(acceleration_measure[2] / norm) * 180 / 3.1415926535;
-  LOG_PRINTK("tilt angle : %g°\n", tilt_angle);
+  LOG_PRINTK("tilt angle : %g° (from accelerometer)\n\n", tilt_angle);
 }
 
-static void print_angular_rate() {
-  // read the contents of all 6 angular rate registers
+static void compute_board_tilt_from_angular_rate() {
+  static double angle[2] = {0, 0};
+
+  // read the contents of the 4 needed angular rate registers
   // put their contents in a buffer
   i2c_write_read_dt(&accelerometer_i2c, &angular_rate_register_address, 1,
-                    angular_rate_register, 6);
+                    angular_rate_register, 4);
 
-  // print the angular rate values
-  for (int i = 0; i < 3; i++) {
+  // integrate the angular rate
+  for (int i = 0; i < 2; i++) {
     uint16_t angular_rate =
         angular_rate_register[i * 2] | (angular_rate_register[i * 2 + 1] << 8);
     angular_rate_measure[i] = (int16_t)angular_rate;
+
+    // the scale of the measure is +/- 250 dps, the frequency is GYROSCOPE_ODR
+    // Hz
+    angle[i] += (float)(angular_rate_measure[i]) / (1 << 15) * 250 /
+                GYROSCOPE_ODR / 180 * 3.1415926535;
   }
+  LOG_DBG("(Rate measures %hd %hd)\n", angular_rate_measure[0],
+          angular_rate_measure[1]);
+
+  double board_tilt = acos(cos(angle[0]) * cos(angle[1]));
   LOG_PRINTK(
-      "Angular rate axis %c : %hd\nAngular rate axis %c : %hd\n"
-      "Angular rate axis %c : %hd\n",
-      axis_label[0], angular_rate_measure[0], axis_label[1],
-      angular_rate_measure[1], axis_label[2], angular_rate_measure[2]);
+      "tilt angle : %g° (from angular rates integration %c : %g°, %c : "
+      "%g°)\n\n",
+      board_tilt / 3.1415926535 * 180, axis_label[0],
+      angle[0] / 3.1415926535 * 180, axis_label[1],
+      angle[1] / 3.1415926535 * 180);
 }
 
 static void configure_accelerometer() {
@@ -160,7 +174,7 @@ static void configure_accelerometer() {
   value = 1 << 4;
   i2c_reg_update_byte_dt(&accelerometer_i2c, 0x15, bit_mask, value);
 
-  // set output data rate of accelerometer at 52Hz
+  // set output data rate of accelerometer at ACCELEROMETER_ODR Hz
   // set bits [7:4] of register 10 (CTRL1_XL) to 0011
   bit_mask = 0xF << 4;
   value = 0x3 << 4;
@@ -172,10 +186,10 @@ static void configure_accelerometer() {
   value = 1 << 7;
   i2c_reg_update_byte_dt(&accelerometer_i2c, 0x16, bit_mask, value);
 
-  // set output data rate of gyroscope at 12.5Hz
-  // set bits [7:4] of register 11 (CTRL2_G) to  0001
+  // set output data rate of gyroscope at GYROSCOPE_ODR Hz
+  // set bits [7:4] of register 11 (CTRL2_G) to  0011
   bit_mask = 0xF << 4;
-  value = 1 << 4;
+  value = 0x3 << 4;
   i2c_reg_update_byte_dt(&accelerometer_i2c, 0x11, bit_mask, value);
 
   // allowing the interruption Accelerometer Data Ready on INT1
