@@ -10,6 +10,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
 
+#include "complementary_filter.h"
+
 /*
  * Using useful device tree structs.
  */
@@ -17,9 +19,9 @@ extern struct i2c_dt_spec accelerometer_i2c;
 extern const struct gpio_dt_spec accelerometer_irq_gpio;
 
 /*
- * Workqueue job to handle the new data
+ * Workqueue job to compute the tilt
  */
-struct k_work handle_new_data_job;
+static struct k_work compute_tilt_job;
 
 /*
  * Linear acceleration register address and values
@@ -31,16 +33,43 @@ static uint8_t acceleration_register[6];
 /*
  * Angular rate register address and values
  */
-static char axis_label[2] = {'X', 'Y'};
 static uint8_t angular_rate_register_address = 0x22;
 static uint8_t angular_rate_register[4];
 static int16_t angular_rate_measure[2];
 
+/*
+ * Initializing a workqueue thread to compute the tilt
+ * using a complementary filter
+ */
+#define MY_STACK_SIZE 512
+#define MY_PRIORITY 13
+
+K_THREAD_STACK_DEFINE(compute_tilt_stack_area, MY_STACK_SIZE);
+
+static struct k_work_q compute_tilt_workq;
+
 void handle_new_data();
+void init_filter_workq();
 static void compute_board_tilt_from_acceleration();
 static void compute_board_tilt_from_angular_rate();
 
 LOG_MODULE_REGISTER(accelerometer_data, CONFIG_LOG_DEFAULT_LEVEL);
+
+void init_filter_workq() {
+  /*
+   * Initializing a workqueue job to compute the tilt
+   * using a complementary filter
+   */
+  init_complementary_filter();
+
+  k_work_init(&compute_tilt_job, compute_board_attitude_with_filter);
+
+  k_work_queue_init(&compute_tilt_workq);
+
+  k_work_queue_start(&compute_tilt_workq, compute_tilt_stack_area,
+                     K_THREAD_STACK_SIZEOF(compute_tilt_stack_area),
+                     MY_PRIORITY, NULL);
+}
 
 void handle_new_data() {
   while (gpio_pin_get_dt(&accelerometer_irq_gpio)) {
@@ -57,6 +86,7 @@ void handle_new_data() {
     if (status_reg & 0x2) {
       compute_board_tilt_from_angular_rate();
     }
+    k_work_submit_to_queue(&compute_tilt_workq, &compute_tilt_job);
   }
 }
 
@@ -67,18 +97,22 @@ static void compute_board_tilt_from_acceleration() {
                     acceleration_register, 6);
 
   // get the acceleration measures from register contents
-  // compute the norm of the acceleration
-  int32_t squared_norm = 0;
   for (int i = 0; i < 3; i++) {
     uint16_t acceleration =
         acceleration_register[i * 2] | (acceleration_register[i * 2 + 1] << 8);
     acceleration_measure[i] = (int16_t)acceleration;
-    squared_norm += acceleration_measure[i] * acceleration_measure[i];
   }
-  double norm = sqrt(squared_norm);
-  // compute the tilt angle
-  double tilt_angle = acos(acceleration_measure[2] / norm) * 180 / 3.1415926535;
-  LOG_PRINTK("tilt angle : %g° (from accelerometer)\n\n", tilt_angle);
+  int32_t g_xy_squared = acceleration_measure[0] * acceleration_measure[0] +
+                         acceleration_measure[1] * acceleration_measure[1];
+  int32_t g_z = acceleration_measure[2];
+
+  double g_xy = sqrt(g_xy_squared);
+  // compute the attitude
+  double tilt_angle = atan2(g_xy, g_z);
+
+  k_mutex_lock(&tilt_from_acceleration.mutex, K_FOREVER);
+  tilt_from_acceleration.value = tilt_angle;
+  k_mutex_unlock(&tilt_from_acceleration.mutex);
 }
 
 static void compute_board_tilt_from_angular_rate() {
@@ -102,11 +136,9 @@ static void compute_board_tilt_from_angular_rate() {
   }
   LOG_DBG("(Rate measures %hd %hd)\n", angular_rate_measure[0],
           angular_rate_measure[1]);
-
   double board_tilt = acos(cos(angle[0]) * cos(angle[1]));
-  LOG_PRINTK(
-      "From angular rates integration %c : %g°, %c : "
-      "%g°\ttilt angle : %g°\n\n",
-      axis_label[0], angle[0] / 3.1415926535 * 180, axis_label[1],
-      angle[1] / 3.1415926535 * 180, board_tilt / 3.1415926535 * 180);
+
+  k_mutex_lock(&tilt_change_from_gyroscope.mutex, K_FOREVER);
+  tilt_change_from_gyroscope.value = board_tilt;
+  k_mutex_unlock(&tilt_change_from_gyroscope.mutex);
 }
