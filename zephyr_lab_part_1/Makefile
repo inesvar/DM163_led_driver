@@ -2,7 +2,7 @@ BOARD=disco_l475_iot1
 RUNNER=jlink
 DEBUG_PORT=/dev/ttyACM0
 # dts file provided by Zephyr
-DFT_DT_FILE=../zephyr/boards/arm/disco_l475_iot1/disco_l475_iot1.dts
+DFT_DT_FILE=../../zephyr/boards/arm/disco_l475_iot1/disco_l475_iot1.dts
 # final dts file
 DT_FILE=build/zephyr/zephyr.dts
 # user terminal
