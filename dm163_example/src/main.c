@@ -30,15 +30,7 @@ int main() {
   // Set brightness to 5% for all leds so that we don't become blind
   for (int i = 0; i < 8; i++) led_set_brightness(dm163_dev, i, 5);
   // Animate the leds on every row and every column
-  for (;;) {
-    for (int row = 0; row < 8; row++) {
-      gpio_pin_set_dt(&rows[row], 1);
-      for (int col = 0; col < 8; col++) {
-        led_on(dm163_dev, col);
-        k_sleep(K_MSEC(30));
-        led_off(dm163_dev, col);
-      }
-      gpio_pin_set_dt(&rows[row], 0);
-    }
+  for (int row = 0; row < 8; row++) {
+    gpio_pin_set_dt(&rows[row], 1);
   }
 }
