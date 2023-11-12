@@ -7,4 +7,4 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(dm163_example)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.c PRIVATE src/spirit_level.c)
