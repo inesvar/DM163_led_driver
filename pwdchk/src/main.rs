@@ -1,3 +1,8 @@
+mod account;
+
+use account::Account;
+
 fn main() {
-    println!("Hello, world!");
+    let account = Account::new("johndoe", "super:complex:password");
+    println!("{account:?}");
 }
