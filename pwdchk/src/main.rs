@@ -3,6 +3,8 @@ mod account;
 use account::Account;
 
 fn main() {
-    let account = Account::new("johndoe", "super:complex:password");
-    println!("{account:?}");
+    println!(
+        "{:?}",
+        Account::from_string("johndoe:super:complex:password")
+    );
 }

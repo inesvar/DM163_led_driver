@@ -12,4 +12,9 @@ impl Account {
             password: password.to_owned(),
         }
     }
+
+    pub fn from_string(s: &str) -> Self {
+        let (login, password) = s.split_once(':').unwrap();
+        Self::new(login, password)
+    }
 }
