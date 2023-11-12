@@ -25,6 +25,7 @@ struct dm163_config {
 struct dm163_data {
   uint8_t brightness[NUM_CHANNELS];
   uint8_t channels[NUM_CHANNELS];
+  struct k_mutex flush_mutex;
 };
 
 static int dm163_set_color(const struct device *dev, uint32_t led,
@@ -51,6 +52,7 @@ static void flush_channels(const struct device *dev);
 static int dm163_init(const struct device *dev) {
   const struct dm163_config *config = dev->config;
   struct dm163_data *data = dev->data;
+  k_mutex_init(&data->flush_mutex);
 
   LOG_DBG("starting initialization of device %s", dev->name);
 
@@ -174,17 +176,20 @@ static void flush_channels(const struct device *dev) {
   const struct dm163_config *config = dev->config;
   struct dm163_data *data = dev->data;
 
+  k_mutex_lock(&data->flush_mutex, K_FOREVER);
   for (int i = NUM_CHANNELS - 1; i >= 0; i--) {
     pulse_data(config, data->channels[i], 8);
   }
   gpio_pin_set_dt(&config->lat, 0);
   gpio_pin_set_dt(&config->lat, 1);
+  k_mutex_unlock(&data->flush_mutex);
 }
 
 static void flush_brightness(const struct device *dev) {
   const struct dm163_config *config = dev->config;
   struct dm163_data *data = dev->data;
 
+  k_mutex_lock(&data->flush_mutex, K_FOREVER);
   gpio_pin_set_dt(&config->selbk, 0);
   for (int i = NUM_CHANNELS - 1; i >= 0; i--) {
     pulse_data(config, data->brightness[i], 6);
@@ -192,6 +197,7 @@ static void flush_brightness(const struct device *dev) {
   gpio_pin_set_dt(&config->lat, 0);
   gpio_pin_set_dt(&config->lat, 1);
   gpio_pin_set_dt(&config->selbk, 1);
+  k_mutex_unlock(&data->flush_mutex);
 }
 
 static int dm163_set_color(const struct device *dev, uint32_t led,
