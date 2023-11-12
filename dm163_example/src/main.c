@@ -3,6 +3,8 @@
 #include <zephyr/drivers/led.h>
 #include <zephyr/kernel.h>
 
+#include "../dm163_module/zephyr/dm163.h"
+
 #define DM163_NODE DT_NODELABEL(dm163)
 static const struct device *dm163_dev = DEVICE_DT_GET(DM163_NODE);
 
@@ -85,11 +87,11 @@ static void display_moving_image(struct Image *moving_image, int nb_images) {
     for (int idx = 0; idx < nb_frames_per_image * nb_images; idx++) {
       for (int row = 0; row < 8; row++) {
         if (k_sem_take(&display_next_line, K_FOREVER) == 0) {
-          gpio_pin_set_dt(&rows[(row + 7) % 8], 0);
           led_write_channels(
               dm163_dev, 0, 24,
               (uint8_t *)moving_image[idx / nb_frames_per_image].channels[row]);
           gpio_pin_set_dt(&rows[row], 1);
+          dm163_turn_off_row(dm163_dev, &rows[row]);
         }
       }
     }

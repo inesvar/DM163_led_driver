@@ -2,6 +2,8 @@
 // DM163 peripherals we can designated them by index.
 #define DT_DRV_COMPAT siti_dm163
 
+#include "dm163.h"
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/led.h>
@@ -27,6 +29,8 @@ struct dm163_data {
   uint8_t channels[NUM_CHANNELS];
   struct k_mutex flush_mutex;
 };
+
+static const struct gpio_dt_spec *row_to_turn_off;
 
 static int dm163_set_color(const struct device *dev, uint32_t led,
                            uint8_t num_colors, const uint8_t *color);
@@ -119,6 +123,11 @@ static const struct led_driver_api dm163_api = {
 // in the device tree and pass it the corresponding index.
 DT_INST_FOREACH_STATUS_OKAY(DM163_DEVICE)
 
+void dm163_turn_off_row(const struct device *dev,
+                        const struct gpio_dt_spec *row) {
+  row_to_turn_off = row;
+}
+
 static int dm163_set_brightness(const struct device *dev, uint32_t led,
                                 uint8_t value) {
   struct dm163_data *data = dev->data;
@@ -179,6 +188,10 @@ static void flush_channels(const struct device *dev) {
   k_mutex_lock(&data->flush_mutex, K_FOREVER);
   for (int i = NUM_CHANNELS - 1; i >= 0; i--) {
     pulse_data(config, data->channels[i], 8);
+    if (i == 2 && row_to_turn_off != NULL) {
+      gpio_pin_set_dt(row_to_turn_off, 0);
+      row_to_turn_off = NULL;
+    }
   }
   gpio_pin_set_dt(&config->lat, 0);
   gpio_pin_set_dt(&config->lat, 1);
