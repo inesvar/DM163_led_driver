@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -33,6 +36,14 @@ impl FromStr for Account {
         }
     }
 }
+
+impl Display for NoColon {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Error: NoColon")
+    }
+}
+
+impl Error for NoColon {}
 
 impl Account {
     pub fn new(login: &str, password: &str) -> Self {
