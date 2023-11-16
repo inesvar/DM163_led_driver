@@ -1,7 +1,9 @@
+use crate::error::Error;
+use eyre::Result;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -10,9 +12,6 @@ pub struct Account {
     login: String,
     password: String,
 }
-
-#[derive(Debug)]
-pub struct NoColon;
 
 pub fn group(accounts: Vec<Account>) -> HashMap<String, Vec<String>> {
     let mut logins_by_password = HashMap::<_, Vec<String>>::new();
@@ -27,23 +26,15 @@ pub fn group(accounts: Vec<Account>) -> HashMap<String, Vec<String>> {
 }
 
 impl FromStr for Account {
-    type Err = NoColon;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once(':') {
             Some((login, password)) => Ok(Self::new(login, password)),
-            None => Err(NoColon),
+            None => Err(Error::NoColon),
         }
     }
 }
-
-impl Display for NoColon {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "Error: NoColon")
-    }
-}
-
-impl Error for NoColon {}
 
 impl Account {
     pub fn new(login: &str, password: &str) -> Self {
@@ -51,5 +42,14 @@ impl Account {
             login: login.to_owned(),
             password: password.to_owned(),
         }
+    }
+
+    pub fn from_file(filename: &Path) -> Result<Vec<Account>> {
+        let file = File::open(filename)?;
+        let reader = BufReader::new(file);
+        Ok(reader
+            .lines()
+            .map(|s| Account::from_str(&s?))
+            .collect::<Result<Vec<_>, _>>()?)
     }
 }

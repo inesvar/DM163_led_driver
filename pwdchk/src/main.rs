@@ -1,7 +1,10 @@
 mod account;
+mod error;
 
 use account::{group, Account};
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
+use eyre::Result;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[clap(version, author, about)]
@@ -17,16 +20,34 @@ enum Command {
 }
 
 #[derive(Args)]
+#[clap(group(
+    ArgGroup::new("input")
+        .required(true)
+        .args(&["file", "account"]),
+))]
 struct GroupArgs {
-    #[clap(required = true)]
     /// Account to check
     account: Vec<Account>,
+    #[clap(short, long)]
+    /// Load passwords from a file
+    file: Option<PathBuf>,
 }
 
-fn main() {
+fn main() -> Result<()> {
+    let _ = color_eyre::install();
     // Check command line
     let args = AppArgs::parse();
     match args.command {
+        Command::Group(GroupArgs {
+            account: _,
+            file: Some(filename),
+        }) => {
+            let accounts = Account::from_file(filename.as_path())?;
+            let same_password_groups = group(accounts);
+            for entry in same_password_groups {
+                println!("Password {0} used by {1}", entry.0, entry.1.join(", "));
+            }
+        }
         Command::Group(args) => {
             let same_password_groups = group(args.account);
             for entry in same_password_groups {
@@ -34,4 +55,5 @@ fn main() {
             }
         }
     }
+    Ok(())
 }
