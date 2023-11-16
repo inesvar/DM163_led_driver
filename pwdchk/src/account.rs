@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -9,6 +10,18 @@ pub struct Account {
 
 #[derive(Debug)]
 pub struct NoColon;
+
+pub fn group(accounts: Vec<Account>) -> HashMap<String, Vec<String>> {
+    let mut logins_by_password = HashMap::<_, Vec<String>>::new();
+    for account in accounts {
+        logins_by_password
+            .entry(account.password)
+            .and_modify(|vec| vec.push(account.login.clone()))
+            .or_insert(vec![account.login]);
+    }
+    logins_by_password.retain(|_key, value| value.len() > 1_usize);
+    logins_by_password
+}
 
 impl FromStr for Account {
     type Err = NoColon;
