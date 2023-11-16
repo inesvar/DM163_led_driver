@@ -13,13 +13,13 @@ pub struct Account {
     password: String,
 }
 
-pub fn group(accounts: Vec<Account>) -> HashMap<String, Vec<String>> {
-    let mut logins_by_password = HashMap::<_, Vec<String>>::new();
+pub fn group(accounts: &[Account]) -> HashMap<&str, Vec<&str>> {
+    let mut logins_by_password = HashMap::<_, Vec<&str>>::new();
     for account in accounts {
         logins_by_password
-            .entry(account.password)
-            .and_modify(|vec| vec.push(account.login.clone()))
-            .or_insert(vec![account.login]);
+            .entry(account.password.as_str())
+            .and_modify(|vec| vec.push(&account.login))
+            .or_insert(vec![&account.login]);
     }
     logins_by_password.retain(|_key, value| value.len() > 1_usize);
     logins_by_password

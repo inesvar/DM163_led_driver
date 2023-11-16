@@ -43,13 +43,13 @@ fn main() -> Result<()> {
             file: Some(filename),
         }) => {
             let accounts = Account::from_file(filename.as_path())?;
-            let same_password_groups = group(accounts);
+            let same_password_groups = group(&accounts);
             for entry in same_password_groups {
                 println!("Password {0} used by {1}", entry.0, entry.1.join(", "));
             }
         }
         Command::Group(args) => {
-            let same_password_groups = group(args.account);
+            let same_password_groups = group(&args.account);
             for entry in same_password_groups {
                 println!("Password {0} used by {1}", entry.0, entry.1.join(", "));
             }
