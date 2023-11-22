@@ -1,9 +1,11 @@
 mod account;
 mod error;
+mod hibp;
 
 use account::{group, Account};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use eyre::Result;
+use hibp::all_sha1_timed;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -17,6 +19,7 @@ struct AppArgs {
 enum Command {
     /// Check duplicate passwords from command line
     Group(GroupArgs),
+    Hibp(HibpArgs),
 }
 
 #[derive(Args)]
@@ -31,6 +34,13 @@ struct GroupArgs {
     #[clap(short, long)]
     /// Load passwords from a file
     file: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct HibpArgs {
+    #[clap(short, long, required = true)]
+    /// Load passwords from a file
+    file: PathBuf,
 }
 
 fn main() -> Result<()> {
@@ -53,6 +63,10 @@ fn main() -> Result<()> {
             for entry in same_password_groups {
                 println!("Password {0} used by {1}", entry.0, entry.1.join(", "));
             }
+        }
+        Command::Hibp(HibpArgs { file: filename }) => {
+            let accounts = Account::from_file(filename.as_path())?;
+            all_sha1_timed(&accounts);
         }
     }
     Ok(())

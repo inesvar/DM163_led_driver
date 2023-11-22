@@ -10,7 +10,7 @@ use std::str::FromStr;
 #[allow(dead_code)]
 pub struct Account {
     login: String,
-    password: String,
+    pub password: String,
 }
 
 pub fn group(accounts: &[Account]) -> HashMap<&str, Vec<&str>> {
