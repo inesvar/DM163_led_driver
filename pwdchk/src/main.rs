@@ -5,7 +5,7 @@ mod hibp;
 use account::{group, Account};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use eyre::Result;
-use hibp::all_sha1_timed;
+use hibp::sha1_by_prefix;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -66,7 +66,8 @@ fn main() -> Result<()> {
         }
         Command::Hibp(HibpArgs { file: filename }) => {
             let accounts = Account::from_file(filename.as_path())?;
-            all_sha1_timed(&accounts);
+            let groups_by_sha1 = sha1_by_prefix(&accounts);
+            println!("{:#?}", groups_by_sha1);
         }
     }
     Ok(())

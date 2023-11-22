@@ -1,7 +1,7 @@
 use crate::account::Account;
 use rayon::prelude::*;
 use sha1::{Digest, Sha1};
-use std::time::Instant;
+use std::collections::HashMap;
 
 fn sha1(account: &Account) -> (String, String) {
     let mut hasher = Sha1::new();
@@ -15,15 +15,20 @@ fn sha1(account: &Account) -> (String, String) {
 fn all_sha1(account: &[Account]) -> Vec<(String, String, &Account)> {
     account
         .par_iter()
-        //.iter()
         .map(|account| (sha1(account).0, sha1(account).1, account))
         .collect()
 }
 
-pub fn all_sha1_timed(account: &[Account]) -> Vec<(String, String, &Account)> {
-    let start = Instant::now();
-    let all_sha1 = all_sha1(account);
-    let duration = start.elapsed();
-    println!("Execution time of all_sha1 : {:?}", duration);
-    all_sha1
+pub fn sha1_by_prefix(accounts: &[Account]) -> HashMap<String, Vec<(String, &Account)>> {
+    let all_sha1 = all_sha1(accounts)
+        .into_iter()
+        .map(|(prefix, suffix, account)| (prefix, (suffix, account)));
+    let mut accounts_by_sha1 = HashMap::<_, Vec<(_, &Account)>>::new();
+    for (prefix, account) in all_sha1 {
+        accounts_by_sha1
+            .entry(prefix)
+            .and_modify(|vec| vec.push(account.clone()))
+            .or_insert(vec![account]);
+    }
+    accounts_by_sha1
 }
