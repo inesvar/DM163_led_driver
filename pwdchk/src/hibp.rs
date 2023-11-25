@@ -1,4 +1,5 @@
-use crate::account::Account;
+use crate::{account::Account, error::Error};
+use eyre::Result;
 use rayon::prelude::*;
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
@@ -31,4 +32,26 @@ pub fn sha1_by_prefix(accounts: &[Account]) -> HashMap<String, Vec<(String, &Acc
             .or_insert(vec![account]);
     }
     accounts_by_sha1
+}
+
+#[allow(dead_code)]
+fn get_page(prefix: &str) -> Result<Vec<String>, Error> {
+    let mut hibp_url: String = String::from("https://api.pwnedpasswords.com/range/");
+    hibp_url.push_str(prefix);
+    let body = reqwest::blocking::get(hibp_url)?.text()?;
+    Ok(body.lines().map(|str| str.to_string()).collect())
+}
+
+#[allow(dead_code)]
+fn get_suffixes(prefix: &str) -> Result<HashMap<String, u64>, Error> {
+    let hibp_page = get_page(prefix)?;
+    let occurences = hibp_page
+        .iter()
+        .map(|s| s[36..].parse::<u64>())
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let suffixes = hibp_page.into_iter().map(|mut s| {
+        s.truncate(35);
+        s
+    });
+    Ok(suffixes.zip(occurences).collect::<HashMap<_, _>>())
 }
