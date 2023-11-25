@@ -1,5 +1,7 @@
 use crate::{account::Account, error::Error};
+use color_print::cprintln;
 use eyre::Result;
+use indicatif::ProgressBar;
 use rayon::prelude::*;
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
@@ -56,14 +58,19 @@ fn get_suffixes(prefix: &str) -> Result<HashMap<String, u64>, Error> {
 
 pub fn check_accounts(accounts: &[Account]) -> Result<Vec<(&Account, u64)>, Error> {
     let mut pawned_accounts = vec![];
+    let bar = ProgressBar::new(accounts.len() as u64);
+    cprintln!("\n<i>Fetching data from \"Have I been pwned?\"...</>");
     let groups_by_sha1 = sha1_by_prefix(accounts);
     for (prefix, accounts) in groups_by_sha1 {
         let pawned_passwords = get_suffixes(&prefix)?;
         for (suffix, account) in accounts {
             let occurence = pawned_passwords.get(&suffix).unwrap_or(&0);
             pawned_accounts.push((account, *occurence));
+            bar.inc(1);
         }
     }
+    bar.finish();
+    cprintln!("<i>Sorting accounts...</>\n");
     pawned_accounts.sort_unstable_by_key(|(_, occur)| std::u64::MAX - *occur);
     Ok(pawned_accounts)
 }
